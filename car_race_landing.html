@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Car Race — Landing Page + Demo</title>
+  <style>
+    :root{--accent:#ff3b3b;--bg:#0b1220;--panel:#111827}
+    *{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{margin:0;background:linear-gradient(180deg,#061022 0%, #071827 100%);color:#e6eef8;display:flex;gap:24px;align-items:flex-start;min-height:100vh;padding:28px}
+    .container{display:flex;gap:24px;width:100%;max-width:1200px;margin:0 auto}
+    .left{flex:1;min-width:320px}
+    .card{background:rgba(255,255,255,0.03);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+    header h1{margin:0 0 6px 0;font-size:20px}
+    header p{margin:0;color:#9fb0d5}
+
+    /* canvas area */
+    #game-wrap{display:flex;flex-direction:column;gap:12px;align-items:center}
+    canvas{background:transparent;border-radius:8px;display:block}
+
+    /* control panel */
+    .panel{width:320px}
+    .panel h3{margin:0 0 12px 0}
+    .row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+    label{font-size:13px;color:#cfe3ff;min-width:120px}
+    input[type="color"], input[type="range"], select{flex:1}
+    .btn{background:var(--accent);border:none;padding:10px 14px;border-radius:8px;color:white;cursor:pointer}
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    .small{font-size:12px;color:#9fb0d5}
+
+    /* footer */
+    footer{margin-top:14px;font-size:12px;color:#9fb0d5}
+
+    /* responsive */
+    @media (max-width:980px){body{padding:12px}.container{flex-direction:column}.panel{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="left">
+      <div class="card">
+        <header>
+          <h1>Racer — Demo Landing Page</h1>
+          <p>Keyboard-controlled mini racing demo. Use the control panel to tweak features in real-time.</p>
+        </header>
+
+        <section id="game-wrap">
+          <canvas id="game" width="360" height="640"></canvas>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="startBtn" class="btn">Start</button>
+            <button id="pauseBtn" class="btn ghost">Pause</button>
+            <div class="small">Use ← → or A / D to move. Space for Boost.</div>
+          </div>
+        </section>
+
+        <footer>
+          <div class="small">Tip: change Car Color, Track Color, Speed & Density in the control panel.</div>
+        </footer>
+      </div>
+
+    </div>
+
+    <aside class="panel card">
+      <h3>Control Panel</h3>
+      <div class="row"><label>Car Color</label><input id="carColor" type="color" value="#ff3b3b" /></div>
+      <div class="row"><label>Track Color</label><input id="trackColor" type="color" value="#1f2937" /></div>
+      <div class="row"><label>Base Speed</label><input id="baseSpeed" type="range" min="2" max="12" value="4" /></div>
+      <div class="row"><label>Obstacle Density</label><input id="density" type="range" min="0" max="1" step="0.05" value="0.18" /></div>
+      <div class="row"><label>Lane Count</label><select id="lanes"><option value="3">3 Lanes</option><option value="4">4 Lanes</option><option value="5">5 Lanes</option></select></div>
+      <div class="row"><label>Show HUD</label><select id="showHUD"><option value="yes">Yes</option><option value="no">No</option></select></div>
+      <div class="row"><label></label><button id="resetBtn" class="btn ghost">Reset Defaults</button></div>
+
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.04);margin:12px 0" />
+      <div style="font-size:13px;color:#9fb0d5;margin-bottom:8px">Advanced</div>
+      <div class="row"><label>Boost Multiplier</label><input id="boostMult" type="range" min="1" max="3" step="0.1" value="1.8"/></div>
+      <div class="row"><label>Obstacle Speed</label><input id="obsSpeed" type="range" min="1" max="8" value="2"/></div>
+
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.04);margin:12px 0" />
+      <div style="font-size:13px;color:#cfe3ff;margin-bottom:6px">Game Stats</div>
+      <div id="hud" style="font-size:13px;color:#9fb0d5">Score: 0 · Speed: 0</div>
+
+    </aside>
+  </div>
+
+  <script>
+    // Simple top-down lane-based car racer demo
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const carColorInput = document.getElementById('carColor');
+    const trackColorInput = document.getElementById('trackColor');
+    const baseSpeedInput = document.getElementById('baseSpeed');
+    const densityInput = document.getElementById('density');
+    const lanesInput = document.getElementById('lanes');
+    const hudEl = document.getElementById('hud');
+    const showHUD = document.getElementById('showHUD');
+    const resetBtn = document.getElementById('resetBtn');
+    const boostMult = document.getElementById('boostMult');
+    const obsSpeed = document.getElementById('obsSpeed');
+
+    const W = canvas.width, H = canvas.height;
+
+    let state = {
+      running:false,
+      paused:false,
+      score:0,
+      speed:parseFloat(baseSpeedInput.value),
+      carX:0,
+      laneCount:parseInt(lanesInput.value),
+      laneWidth:0,
+      carLane: Math.floor(parseInt(lanesInput.value)/2),
+      obstacles:[],
+      keys:{left:false,right:false,boost:false}
+    };
+
+    // Resize helper (keeps canvas pixel-perfect but we will keep fixed size for demo)
+    function resetSettings(){
+      carColorInput.value = '#ff3b3b';
+      trackColorInput.value = '#1f2937';
+      baseSpeedInput.value = 4;
+      densityInput.value = 0.18;
+      lanesInput.value = 3;
+      boostMult.value = 1.8;
+      obsSpeed.value = 2;
+      showHUD.value = 'yes';
+      applySettings();
+    }
+
+    function applySettings(){
+      state.speed = parseFloat(baseSpeedInput.value);
+      state.laneCount = parseInt(lanesInput.value);
+      state.laneWidth = Math.floor(W / state.laneCount);
+      state.carLane = Math.max(0, Math.min(state.laneCount-1, state.carLane));
+    }
+
+    // init
+    resetSettings();
+
+    // input
+    window.addEventListener('keydown', e=>{
+      if(e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') state.keys.left = true;
+      if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') state.keys.right = true;
+      if(e.code === 'Space') state.keys.boost = true;
+      if(e.key === 'p') togglePause();
+    });
+    window.addEventListener('keyup', e=>{
+      if(e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') state.keys.left = false;
+      if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') state.keys.right = false;
+      if(e.code === 'Space') state.keys.boost = false;
+    });
+
+    // buttons
+    startBtn.addEventListener('click', ()=>{
+      if(!state.running){startGame(); startBtn.textContent='Restart'} else restartGame();
+    });
+    pauseBtn.addEventListener('click', ()=> togglePause());
+    resetBtn.addEventListener('click', resetSettings);
+
+    // live inputs
+    [carColorInput, trackColorInput, baseSpeedInput, densityInput, lanesInput, boostMult, obsSpeed, showHUD].forEach(el=> el.addEventListener('input', ()=> applySettings()));
+
+    function startGame(){
+      state.running = true; state.paused=false; state.score=0; state.obstacles=[]; state.carLane = Math.floor(state.laneCount/2);
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+    function restartGame(){
+      state.running=false; // quickly reset
+      startGame();
+    }
+    function togglePause(){ state.paused = !state.paused; pauseBtn.textContent = state.paused ? 'Resume' : 'Pause'; }
+
+    // obstacles creation
+    function spawnObstacle(){
+      const lane = Math.floor(Math.random()*state.laneCount);
+      const width = state.laneWidth * 0.7;
+      const x = lane*state.laneWidth + (state.laneWidth - width)/2;
+      const speed = parseFloat(obsSpeed.value) + Math.random()*1.2;
+      state.obstacles.push({x, y:-40, w:width, h:36, lane, speed});
+    }
+
+    // collision check
+    function collides(a,b){
+      return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+    }
+
+    // game loop
+    let spawnTimer = 0; let lastTime = 0;
+    function loop(ts){
+      if(!state.running) return;
+      const dt = Math.min(40, ts - lastTime); lastTime = ts;
+      if(!state.paused){
+        update(dt/16);
+      }
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    function update(delta){
+      // lane movement
+      if(state.keys.left) state.carLane = Math.max(0, state.carLane - 0.1*delta*6);
+      if(state.keys.right) state.carLane = Math.min(state.laneCount-1, state.carLane + 0.1*delta*6);
+      // quantize to integer lane when not pressing
+      if(!state.keys.left && !state.keys.right) state.carLane = Math.round(state.carLane);
+
+      // obstacle spawning proportional to density
+      spawnTimer += delta*0.016;
+      const density = parseFloat(densityInput.value);
+      if(Math.random() < density * delta * 0.6) spawnObstacle();
+
+      // update obstacles
+      const boost = state.keys.boost ? parseFloat(boostMult.value) : 1;
+      const globalSpeed = state.speed * boost;
+      state.obstacles.forEach(o=> o.y += (o.speed + globalSpeed) * (delta*0.8));
+      // remove offscreen
+      state.obstacles = state.obstacles.filter(o=> o.y < H+60);
+
+      // check collisions with car rect
+      const car = getCarRect();
+      for(let o of state.obstacles){
+        if(collides(car, o)){
+          // simple collision -> end game
+          state.running = false;
+          startBtn.textContent = 'Start';
+          alert('Crashed! Score: ' + Math.floor(state.score));
+        }
+      }
+
+      // increase score
+      state.score += globalSpeed * 0.02 * delta;
+    }
+
+    function getCarRect(){
+      const cw = state.laneWidth * 0.6; const ch = 48;
+      const cx = Math.floor(state.carLane)*state.laneWidth + (state.laneWidth - cw)/2;
+      const cy = H - ch - 18;
+      return {x:cx, y:cy, w:cw, h:ch};
+    }
+
+    function render(){
+      // clear
+      ctx.clearRect(0,0,W,H);
+
+      // draw track
+      ctx.fillStyle = trackColorInput.value;
+      ctx.fillRect(0,0,W,H);
+
+      // lane separators
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 2;
+      for(let i=1;i<state.laneCount;i++){
+        const x = i * state.laneWidth;
+        for(let y= -40; y < H; y+=40){
+          ctx.beginPath(); ctx.setLineDash([18,14]); ctx.moveTo(x, y); ctx.lineTo(x, y+28); ctx.stroke(); ctx.setLineDash([]);
+        }
+      }
+
+      // obstacles
+      state.obstacles.forEach(o=>{
+        ctx.fillStyle = '#22303f';
+        ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.strokeRect(o.x, o.y, o.w, o.h);
+      });
+
+      // car
+      const car = getCarRect();
+      ctx.fillStyle = carColorInput.value;
+      roundRect(ctx, car.x, car.y, car.w, car.h, 8, true, false);
+      // simple windows
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(car.x + car.w*0.12, car.y+6, car.w*0.76, car.h*0.34);
+
+      // HUD
+      if(showHUD.value === 'yes'){
+        hudEl.textContent = 'Score: ' + Math.floor(state.score) + ' · Speed: ' + (state.speed * (state.keys.boost ? parseFloat(boostMult.value) : 1)).toFixed(1);
+      } else {
+        hudEl.textContent = '';
+      }
+    }
+
+    function roundRect(ctx, x, y, w, h, r, fill, stroke){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r);
+      ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);
+      ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath();
+      if(fill) ctx.fill(); if(stroke) ctx.stroke();
+    }
+
+    // initial render
+    render();
+
+    // expose a few debug helpers (for dev)
+    window._gameState = state;
+  </script>
+</body>
+</html>
